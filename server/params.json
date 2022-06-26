@@ -13,7 +13,7 @@
     },
     {
         "ParameterKey": "KeyName",
-        "ParameterValue": "UdacityProject"
+        "ParameterValue": "UdacityProject2ec2"
     },
     {
         "ParameterKey": "InstanceType",
@@ -33,7 +33,7 @@
     },
     {
         "ParameterKey": "BucketName",
-        "ParameterValue": "test-726559158740"
+        "ParameterValue": "udacityproject2-726559158740"
     },
     {
         "ParameterKey": "ObjectName",
