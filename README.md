@@ -9,4 +9,6 @@ This project contains two templates for the network and server components separa
 For more features refer to the infrastructure diagram in ./UdacityProject2.jpeg
 
 
+application url : http://server-LB-CDR7J92J6XZ7-312414169.us-west-2.elb.amazonaws.com
+
 
