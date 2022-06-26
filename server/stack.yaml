@@ -1,0 +1,289 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: template for UdacityProject2 webserver ASG and lb
+
+Parameters:
+  EnvironmentName: 
+    Type: String
+    Description: prefix for project resource names
+  IpParamKey:
+    Type: String
+    Description: the parameter name for the ip ssm parameter
+  IpParamVersion:
+    Type: String
+    Description: the version of the ssm parameter for the ip address
+  KeyName:
+    Type: String
+    Description: name of key pair to encrypt server disk data
+  BucketName:
+    Type: String
+    Description: name of the bucket with the html file for the webserver
+  ObjectName:
+    Type: String
+    Description: Name of the html file in the bucket to serve
+  ImageId:
+    Type: String
+    Description: ami for the ec2 instances
+  InstanceType:
+    Type: String
+    Description: Instance Type for the ec2 instances
+  ASGmin:
+    Type: String
+    Description: minimun number of instances in the autoscaling group
+  ASGmax:
+    Type: String
+    Description: maximum number of instances in the autoscaling group
+
+Resources:
+  ServerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties: 
+      GroupDescription: Allow http from LB, ssh from local network and all tcp egress
+      Tags: 
+        - Key: Name
+          Value: !Sub ${EnvironmentName} webserver
+      VpcId: 
+        Fn::ImportValue: !Sub ${EnvironmentName}-VPC
+
+  ServerSecurityGroupIngress1:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties: 
+      Description: allow http from LB
+      FromPort: 80      
+      ToPort: 80
+      GroupId: !Ref ServerSecurityGroup
+      IpProtocol: tcp
+      SourceSecurityGroupId: !Ref LBSecurityGroup
+
+  ServerSecurityGroupIngress2:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties: 
+      Description: allow ssh from jumphost
+      FromPort: 22      
+      ToPort: 22
+      GroupId: !Ref ServerSecurityGroup
+      IpProtocol: tcp
+      SourceSecurityGroupId: !Ref JumphostSecurityGroup
+
+  ServerSecurityGroupEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties: 
+      CidrIp: 0.0.0.0/0
+      Description: allow all tcp egress
+      FromPort: 0
+      GroupId: !Ref ServerSecurityGroup
+      IpProtocol: tcp
+      ToPort: 65535
+
+  JumphostSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties: 
+      GroupDescription: Allow ssh from my ip and ssh to webserver
+      Tags: 
+        - Key: Name
+          Value: !Sub ${EnvironmentName} Jumphost
+      VpcId: 
+        Fn::ImportValue: !Sub ${EnvironmentName}-VPC
+
+  JumphostSecurityGroupIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties: 
+      Description: allow ssh from myip
+      FromPort: 22      
+      ToPort: 22
+      GroupId: !Ref JumphostSecurityGroup
+      IpProtocol: tcp
+      CidrIp: !Join ['', [!Sub "{{resolve:ssm:${IpParamKey}:${IpParamVersion}}}", /32]]
+  
+  JumphostSecurityGroupEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties: 
+      Description: Allow SSH to webserver
+      DestinationSecurityGroupId: !Ref ServerSecurityGroup
+      FromPort: 22
+      ToPort: 22
+      GroupId: !Ref JumphostSecurityGroup
+      IpProtocol: tcp
+
+  LBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties: 
+      GroupDescription: Allow http from anywhere and http to webserver
+      Tags: 
+        - Key: Name
+          Value: !Sub ${EnvironmentName} LB
+      VpcId: 
+        Fn::ImportValue: !Sub ${EnvironmentName}-VPC
+  
+  LBSecurityGroupIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties: 
+      CidrIp: 0.0.0.0/0
+      Description: allow http to lb from anywhere
+      FromPort: 80
+      ToPort: 80
+      GroupId: !Ref LBSecurityGroup
+      IpProtocol: tcp
+
+  LBSecurityGroupEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties: 
+      Description: allow http to webservers
+      DestinationSecurityGroupId: !Ref ServerSecurityGroup
+      FromPort: 80
+      GroupId: !Ref LBSecurityGroup
+      IpProtocol: tcp
+      ToPort: 80
+
+  ServerIamRole:
+    Type: AWS::IAM::Role
+    Properties: 
+      AssumeRolePolicyDocument: 
+        Version: 2012-10-17
+        Statement: 
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action: 
+              - "sts:AssumeRole"
+      Policies: 
+        - PolicyName: !Sub ${EnvironmentName}TestBucketReadonly
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                   - "s3:GetObject" 
+                Resource: !Sub "arn:aws:s3:::${BucketName}/${ObjectName}"
+      RoleName: !Sub ${EnvironmentName}-webserver
+
+  ServerInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Description: Instance profile for the ServerIamRole
+    Properties: 
+      InstanceProfileName: !Sub ${EnvironmentName}InstanceProfile
+      Roles: 
+        - !Ref ServerIamRole
+  
+  Jumphost:
+    Type: AWS::EC2::Instance
+    Description: instance in the public subnet that can be used to ssh into the private servers
+    Properties:
+      ImageId: !Ref ImageId
+      InstanceType: t3.small
+      KeyName: !Ref KeyName
+      NetworkInterfaces: 
+        - AssociatePublicIpAddress: "true"
+          DeviceIndex: "0"
+          GroupSet: 
+            - Ref: JumphostSecurityGroup
+          SubnetId: 
+            Fn::ImportValue: !Sub ${EnvironmentName}PubSub1
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}Jumphost
+
+  ServerLaunchConfig:
+    Type: AWS::AutoScaling::LaunchConfiguration
+    Description: launch configuration for the webserver auto scaling group
+    Properties: 
+      BlockDeviceMappings: 
+        -  DeviceName: /dev/sdk
+           Ebs:
+             VolumeSize: 10
+      IamInstanceProfile: !Ref ServerInstanceProfile
+      ImageId: !Ref ImageId
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyName
+      LaunchConfigurationName: !Sub ${EnvironmentName}
+      SecurityGroups: 
+        - Ref: ServerSecurityGroup
+      UserData: 
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          apt-get update -y
+          apt-get install apache2 awscli -y
+          systemctl start apache2.service
+          cd /var/www/html
+          aws s3 cp s3://${BucketName}/${ObjectName} ./index.html
+
+  ServerASG:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties: 
+      AutoScalingGroupName: !Ref EnvironmentName
+      HealthCheckGracePeriod: 60
+      HealthCheckType: ELB
+      LaunchConfigurationName: !Ref ServerLaunchConfig
+      MaxSize: !Ref ASGmax
+      MinSize: !Ref ASGmin
+      TargetGroupARNs: 
+        - Ref: LBTargetGroup
+      VPCZoneIdentifier: 
+        - Fn::ImportValue: !Sub ${EnvironmentName}PrivateSubnets
+
+  LB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties: 
+      IpAddressType: ipv4
+      Scheme: internet-facing
+      SecurityGroups: 
+        - Ref: LBSecurityGroup
+      Subnets: 
+        - Fn::ImportValue: !Sub ${EnvironmentName}PubSub1
+        - Fn::ImportValue: !Sub ${EnvironmentName}PubSub2
+      Tags: 
+        - Key: Name
+          Value: !Sub ${EnvironmentName}AppLB
+
+  LBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties: 
+      DefaultActions: 
+        - Type: forward
+          TargetGroupArn: !Ref LBTargetGroup
+      LoadBalancerArn: !Ref LB
+      Port: 80
+      Protocol: HTTP
+
+  LBTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties: 
+      HealthCheckIntervalSeconds: 30
+      HealthCheckPath: /
+      HealthCheckPort: 80
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 10
+      HealthyThresholdCount: 2
+      Port: 80
+      Protocol: HTTP
+      Tags: 
+        - Key: Name
+          Value: !Ref EnvironmentName      
+      UnhealthyThresholdCount: 3
+      VpcId: 
+        Fn::ImportValue: !Sub ${EnvironmentName}-VPC
+
+Outputs:
+  LoadBalancer:
+    Description: URL of the loadbalancer
+    Value: !Join ['',['http://',!GetAtt LB.DNSName]]
+    Export:
+      Name: !Sub ${EnvironmentName}WebserverUrl
+
+
+
+  
+
+
+
+
+
+
+
+
+
+
+    
+
+
+

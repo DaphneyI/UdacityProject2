@@ -1,0 +1,42 @@
+[
+    {
+        "ParameterKey": "EnvironmentName",
+        "ParameterValue": "UdacityProject2"
+    },
+    {
+        "ParameterKey": "IpParamKey",
+        "ParameterValue": "MyIP"
+    },
+    {
+        "ParameterKey": "IpParamVersion",
+        "ParameterValue": "1"
+    },
+    {
+        "ParameterKey": "KeyName",
+        "ParameterValue": "UdacityProject"
+    },
+    {
+        "ParameterKey": "InstanceType",
+        "ParameterValue": "t2.medium"
+    },
+    {
+        "ParameterKey": "ImageId",
+        "ParameterValue": "ami-0b152cfd354c4c7a4"
+    },
+    {
+        "ParameterKey": "ASGmin",
+        "ParameterValue": "2"
+    },
+    {
+        "ParameterKey": "ASGmax",
+        "ParameterValue": "4"
+    },
+    {
+        "ParameterKey": "BucketName",
+        "ParameterValue": "test-726559158740"
+    },
+    {
+        "ParameterKey": "ObjectName",
+        "ParameterValue": "udacityproject2.html"
+    }
+]
